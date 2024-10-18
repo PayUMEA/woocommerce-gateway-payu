@@ -6,7 +6,7 @@
  * Description: Accept payments using PayU
  * Author: PayU MEA
  * Author URI: https://southafrica.payu.com/
- * Version: 1.0.0
+ * Version: 2.0.0
  * Requires at least: 6.5
  * Tested up to: 6.6
  * Requires PHP: 8.0
@@ -181,7 +181,7 @@ function load_payu_gateway_class() {
         public function admin_options()
         {
             ?>
-            <h3><?php _e('PayU MEA (Redirect)', 'woocommerce-gateway-payu'); ?></h3>
+            <h3><?php _e('PayU', 'woocommerce-gateway-payu'); ?></h3>
             <p><?php _e('PayU Redirect Payment works by sending the user to PayU to enter their payment information.', 'woocommerce-gateway-payu'); ?></p>
 
             <?php if ($this->is_valid_for_use()) : ?>
