@@ -20,15 +20,15 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-add_action( 'plugins_loaded', 'load_payu_rpp_gateway_class', 0 );
+add_action( 'plugins_loaded', 'load_payu_gateway_class', 0 );
 
-function load_payu_rpp_gateway_class() {
+function load_payu_gateway_class() {
 
     if (!class_exists( 'WC_Payment_Gateway' ) ) {
         return;
     }
 
-    class WC_Gateway_PayU_RPP extends WC_Payment_Gateway
+    class WC_Gateway_PayU extends WC_Payment_Gateway
     {
         /**
          * @var ?stdClass
@@ -36,7 +36,7 @@ function load_payu_rpp_gateway_class() {
         protected ?stdClass $txn_data = null;
 
         /**
-         * WC_Gateway_PayU_RPP constructor.
+         * WC_Gateway_PayU constructor.
          *
          * @access public
          * @return void
@@ -79,7 +79,7 @@ function load_payu_rpp_gateway_class() {
             add_action('woocommerce_update_options_payment_gateways_' . $this->id, [$this, 'process_admin_options']);
 
             // Payment listener/API hook
-            add_action('woocommerce_api_wc_gateway_payu_rpp', [$this, 'process_payu_callback']);
+            add_action('woocommerce_api_wc_gateway_payu', [$this, 'process_payu_callback']);
 
             if (!$this->is_valid_for_use()) {
                 $this->enabled = false;
@@ -90,7 +90,7 @@ function load_payu_rpp_gateway_class() {
         {
             $this->id = 'payu';
             $this->icon = WP_PLUGIN_URL . DIRECTORY_SEPARATOR . plugin_basename(dirname(__FILE__)) . '/images/payu_mea_logo.png';
-            $this->method_title = __('PayU MEA (Redirect)', 'woocommerce-gateway-payu');
+            $this->method_title = __('PayU', 'woocommerce-gateway-payu');
             $this->method_description = __('Accept payments with credit/debit cards, EFT, Discovery miles, eBucks and many more');
             $this->has_fields = true;
         }
@@ -110,7 +110,7 @@ function load_payu_rpp_gateway_class() {
             $this->debit_order_type = $this->get_option('debit_order_type');
             $this->enable_logging = $this->get_option('enable_logging');
             $this->extended_debug = $this->get_option('extended_debug');
-            $this->notify_url = add_query_arg('wc-api', 'WC_Gateway_PayU_RPP', home_url());
+            $this->notify_url = add_query_arg('wc-api', 'WC_Gateway_PayU', home_url());
         }
 
         private function init() {
@@ -1069,11 +1069,11 @@ function load_payu_rpp_gateway_class() {
      * Add the Gateway to WooCommerce
      *
      */
-    function woocommerce_add_payu_rpp($methods) {
-        $methods[] = 'WC_Gateway_PayU_RPP';
+    function woocommerce_add_gateway_payu($methods) {
+        $methods[] = 'WC_Gateway_PayU';
         return $methods;
     }
 
     // add the payment gateway to WooCommerce using filter woocommerce_payment_gateways
-    add_filter('woocommerce_payment_gateways', 'woocommerce_add_payu_rpp');
+    add_filter('woocommerce_payment_gateways', 'woocommerce_add_gateway_payu');
 }
