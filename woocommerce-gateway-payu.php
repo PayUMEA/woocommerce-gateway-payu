@@ -563,19 +563,29 @@ class WC_PayU
             exit('Invalid nonce');
         }
 
+        if (!current_user_can('edit_shop_orders')) {
+            wp_send_json_error(__('You are not allowed to refund orders.', 'woocommerce-gateway-payu'));
+        }
+
         $amount = sanitize_text_field($_REQUEST['amount']);
         $order_id = (int) sanitize_text_field($_REQUEST['order_id']);
-        $order = wc_get_order($order_id);
+
+        if (!wc_get_order($order_id)) {
+            wp_send_json_error(__('Order not found.', 'woocommerce-gateway-payu'));
+        }
 
         $amount = str_replace(",", ".", $amount);
         $amount = floatval($amount);
 
-        $payment_method = $order->get_payment_method();
-        $gateways = WC()->payment_gateways()->get_available_payment_gateways();
-
-        /** @var WC_PayU_Payment_Method $gateway */
-        $gateway = $gateways[$payment_method];
-        $result = $gateway->refund_payment($order_id, $amount);
+        // Create a WooCommerce refund record so the order's refunded total and status stay in sync.
+        // refund_payment makes WooCommerce call the gateway's process_refund(), and it deletes the
+        // record again if PayU rejects the refund.
+        $result = wc_create_refund([
+            'amount' => $amount,
+            'order_id' => $order_id,
+            'reason' => __('Refunded from the PayU order metabox', 'woocommerce-gateway-payu'),
+            'refund_payment' => true,
+        ]);
 
         if (!is_wp_error($result)) {
             wp_send_json_success(__('Refund success', 'woocommerce-gateway-payu'));
