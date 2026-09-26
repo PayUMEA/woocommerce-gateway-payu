@@ -555,7 +555,7 @@ class WC_PayU
     }
 
     /**
-     * Action for Cancel
+     * Action for Refund
      */
     public function ajax_payu_gateway_refund()
     {
@@ -627,7 +627,7 @@ class WC_PayU
     }
 
     /**
-     * Plugin url.
+     * Plugin absolute path.
      *
      * @return string
      */
