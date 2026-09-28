@@ -106,8 +106,75 @@ class PayU_Payment_Transaction extends PayU_Payment_Base {
 	public function do_get_transaction($payload = [])
 	{
 		$response = $this->do_soap_call('getTransaction', $payload);
+		$data = json_decode(json_encode($response['return']));
 
-		return json_decode(json_encode($response['return']));
+		return $this->with_payment_method_types($data, (string) $this->soap_client->__getLastResponse());
+	}
+
+	/**
+	 * Adds each paymentMethodsUsed entry's xsi:type (e.g. creditCard) as paymentMethodType.
+	 *
+	 * The SOAP to JSON conversion drops XML attributes, so the types are read from the raw response.
+	 *
+	 * @param stdClass|null $data Decoded getTransaction return data
+	 * @param string $raw_xml Raw SOAP response
+	 * @return stdClass|null
+	 */
+	private function with_payment_method_types(?stdClass $data, string $raw_xml): ?stdClass
+	{
+		if (!isset($data->paymentMethodsUsed)) {
+			return $data;
+		}
+
+		$types = $this->extract_payment_method_types($raw_xml);
+		$is_list = is_array($data->paymentMethodsUsed);
+		$methods = $is_list ? $data->paymentMethodsUsed : [$data->paymentMethodsUsed];
+
+		$typed_methods = array_map(
+			fn($method, int $index) => (object) array_merge(
+				(array) $method,
+				['paymentMethodType' => $types[$index] ?? '']
+			),
+			$methods,
+			array_keys($methods)
+		);
+
+		$result = clone $data;
+		$result->paymentMethodsUsed = $is_list ? $typed_methods : $typed_methods[0];
+
+		return $result;
+	}
+
+	/**
+	 * @param string $raw_xml Raw SOAP response
+	 * @return string[] The xsi:type of each paymentMethodsUsed element without its prefix, in document order
+	 */
+	private function extract_payment_method_types(string $raw_xml): array
+	{
+		if ('' === $raw_xml) {
+			return [];
+		}
+
+		$dom = new DOMDocument();
+		$previous = libxml_use_internal_errors(true);
+		$loaded = $dom->loadXML($raw_xml, LIBXML_NONET);
+		libxml_clear_errors();
+		libxml_use_internal_errors($previous);
+
+		if (!$loaded) {
+			$this->log('getTransaction', 'Unable to parse response XML for paymentMethodsUsed types');
+			return [];
+		}
+
+		$types = [];
+		foreach ($dom->getElementsByTagName('paymentMethodsUsed') as $element) {
+			$type = $element->getAttributeNS('http://www.w3.org/2001/XMLSchema-instance', 'type');
+			// "ns2:creditCard" => "creditCard"
+			$parts = explode(':', $type);
+			$types[] = end($parts);
+		}
+
+		return $types;
 	}
 	
 	
