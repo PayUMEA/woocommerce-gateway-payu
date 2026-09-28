@@ -1189,7 +1189,7 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
 
             foreach ($payment_methods as $index => $payment_method) {
                 $type = $payment_method->paymentMethodType ?? '';
-                $transaction_notes .= "<br />=== " . ($type ?? $index) . " ===";
+                $transaction_notes .= "<br />=== " . ('' !== $type ? $type : $index) . " ===";
                 foreach ($payment_method as $key => $value) {
                     $transaction_notes .= "<br />&nbsp;&nbsp;=> " . $key . ": " . $value;
                 }
@@ -1296,7 +1296,7 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
     }
 
     private function is_separate_discovery_miles_configuration() {
-        return 'yes' === $this->settings['dm_enabled'] &&
+        return 'yes' === $this->dm_enabled &&
             !empty($this->settings['dm_username']) &&
             !empty($this->settings['dm_password']) &&
             !empty($this->settings['dm_safekey']);
