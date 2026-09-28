@@ -227,7 +227,7 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
             if (
                 isset($method) &&
                 in_array($method, [WC_PayU_Payment_Methods::DISCOVERY_MILES, 'payu_discoverymiles']) &&
-                !empty($this->settings['dm_safekey'])
+                $this->is_separate_discovery_miles_configuration()
             ) {
                 $payu_credentials_prefix = 'dm';
                 $safekey = $this->settings['dm_safekey'];
@@ -237,11 +237,13 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
             $order->update_meta_data('_payu_credentials_prefix', $payu_credentials_prefix);
             $order->update_meta_data('_payu_transaction_payment_method', $method);
 
-            if (('dm' !== $payu_credentials_prefix) && !empty($this->settings['dm_username'])) {
+            if ('dm' !== $payu_credentials_prefix) {
                 $payment_methods = explode(',', $this->payment_method);
                 $code = strtoupper(WC_PayU_Payment_Methods::DISCOVERY_MILES);
 
-                if (in_array($code, $payment_methods)) {
+                if (in_array($code, $payment_methods) &&
+                    $this->is_separate_discovery_miles_configuration()
+                ) {
                     $index = array_search($code, $payment_methods);
                     unset($payment_methods[$index]);
                 }
@@ -251,7 +253,6 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
 
             // Config for SOAP client instantiation
             $config = $this->get_configuration();
-
             $txnData = $this->get_transaction_data($config, $order);
             $txnData['Safekey'] = $safekey;
 
@@ -548,34 +549,19 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
         $order_id = (int)$return_data['MerchantReference'];
         $pay_u_reference = $return_data['PayUReference'];
 
-       
         $this->log('Received webhook xml: ' . PHP_EOL . print_r($return_data, true));
 
-        // Validate amount
-        if (!$this->validate_amount_paid()) {
+        $order = new WC_Order($order_id);
+        
+        if (empty($order)) {
             $this->log(
-                '----------- Invalid amount webhook --------------' . PHP_EOL .
+                '----------- Invalid order id --------------' . PHP_EOL .
                     "Order No: " . $order_id . PHP_EOL .
                     "PayU Reference: " . $pay_u_reference . PHP_EOL .
                     '--------------------------------------------'
             );
 
-            wp_die("PayU Notify Amount Failure");
-        }
-
-        if (isset($order_id) && !empty($order_id) && is_numeric($order_id)) {
-            $order = new WC_Order($order_id);
-
-            if (empty($order)) {
-                $this->log(
-                    '----------- Invalid order id --------------' . PHP_EOL .
-                        "Order No: " . $order_id . PHP_EOL .
-                        "PayU Reference: " . $pay_u_reference . PHP_EOL .
-                        '--------------------------------------------'
-                );
-
-                wp_die("PayU Notify Order Id Invalid");
-            }
+            wp_die("PayU Notify Order Id Invalid");
         }
 
         if ($order->get_status() === 'processing' || $order->get_status() === 'completed') {
@@ -606,6 +592,18 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
             ) {
                 $amount_due = $this->get_total_due();
                 $amount_paid = $this->get_total_paid();
+
+                // Validate amount
+                if (!$this->validate_amount_paid($amount_due, $amount_paid)) {
+                    $this->log(
+                        '----------- Invalid amount webhook --------------' . PHP_EOL .
+                            "Order No: " . $order_id . PHP_EOL .
+                            "PayU Reference: " . $pay_u_reference . PHP_EOL .
+                            '--------------------------------------------'
+                    );
+
+                    wp_die("PayU Notify Amount Failure");
+                }
 
                 $transaction_notes = '';
                 $transaction_notes .= "<strong>-----PAYU IPN RECIEVED---</strong><br />";
@@ -729,79 +727,9 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
         ]);
     }
 
-    public function is_payment_new(): bool
-    {
-        return $this->txnData->successful
-            && $this->get_transaction_state() === 'NEW';
-    }
-
-    public function is_payment_successful(): bool
-    {
-        return $this->txnData->successful
-            && ($this->get_transaction_state() === 'SUCCESSFUL' || $this->get_result_code() === '00');
-    }
-
-    public function is_refund_successful(): bool
-    {
-        return $this->txnData->successful
-            && $this->get_result_code() === '00';
-    }
-
-    public function is_void_successful(): bool
-    {
-        return $this->txnData->successful
-            && $this->get_result_code() === '00';
-    }
-
-    /**
-     * @return bool
-     */
-    public function is_payment_pending(): bool
-    {
-        return $this->txnData->successful
-            && $this->get_transaction_state() === 'AWAITING_PAYMENT';
-    }
-
-    /**
-     * @return bool
-     */
-    public function is_payment_processing(): bool
-    {
-        return ($this->txnData->successful === true || $this->txnData->successful === false)
-            && $this->get_transaction_state() === 'PROCESSING';
-    }
-
-    /**
-     * @return bool
-     */
-    public function is_payment_failed(): bool
-    {
-        return ($this->txnData->successful === true || $this->txnData->successful === false)
-            && in_array(
-                $this->get_transaction_state(),
-                ['FAILED', 'EXPIRED', 'TIMEOUT']
-            );
-    }
-
-    public function get_display_message(): string
-    {
-        return $this->txnData->displayMessage ?? '';
-    }
-
-    public function get_result_message(): string
-    {
-        return $this->txnData->resultMessage ?? '';
-    }
-
-    public function get_payu_reference(): string
-    {
-        return $this->txnData->payUReference ?? '';
-    }
-
     /**
      * Store the transaction id.
      *
-     * @param array    $transaction The transaction returned by the api wrapper.
      * @param WC_Order $order The order object related to the transaction.
      */
     public function save_transaction_id($order)
@@ -987,6 +915,75 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
         return $txnData;
     }
 
+    public function is_payment_new(): bool
+    {
+        return ($this->txnData->successful ?? false)
+            && $this->get_transaction_state() === 'NEW';
+    }
+
+    public function is_payment_successful(): bool
+    {
+        return ($this->txnData->successful ?? false)
+            && ($this->get_transaction_state() === 'SUCCESSFUL' || $this->get_result_code() === '00');
+    }
+
+    public function is_refund_successful(): bool
+    {
+        return ($this->txnData->successful ?? false)
+            && $this->get_result_code() === '00';
+    }
+
+    public function is_void_successful(): bool
+    {
+        return ($this->txnData->successful ?? false)
+            && $this->get_result_code() === '00';
+    }
+
+    /**
+     * @return bool
+     */
+    public function is_payment_pending(): bool
+    {
+        return ($this->txnData->successful ?? false)
+            && $this->get_transaction_state() === 'AWAITING_PAYMENT';
+    }
+
+    /**
+     * @return bool
+     */
+    public function is_payment_processing(): bool
+    {
+        return ($this->txnData->successful === true || $this->txnData->successful === false)
+            && $this->get_transaction_state() === 'PROCESSING';
+    }
+
+    /**
+     * @return bool
+     */
+    public function is_payment_failed(): bool
+    {
+        return ($this->txnData->successful === true || $this->txnData->successful === false)
+            && in_array(
+                $this->get_transaction_state(),
+                ['FAILED', 'EXPIRED', 'TIMEOUT']
+            );
+    }
+
+    public function get_display_message(): string
+    {
+        return $this->txnData->displayMessage ?? '';
+    }
+
+    public function get_result_message(): string
+    {
+        return $this->txnData->resultMessage ?? '';
+    }
+
+    public function get_payu_reference(): string
+    {
+        return $this->txnData->payUReference ?? '';
+    }
+
     protected function get_redirect_url(): string
     {
         return $this->txnData->redirect_payment_url ?? '';
@@ -1002,10 +999,10 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
      */
     protected function has_payment_method(): bool
     {
-        return property_exists($this->txnData, 'paymentMethodsUsed');
+        return isset($this->txnData->paymentMethodsUsed);
     }
 
-    protected function get_payment_method(): stdClass|array
+    protected function get_payment_method(): stdClass|array|null
     {
         return $this->has_payment_method() ? $this->txnData->paymentMethodsUsed : null;
     }
@@ -1167,9 +1164,12 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
         return isset($this->txnData->recurringDetails) ? $this->txnData->recurringDetails : null;
     }
 
-    protected function get_total_due(): int
+    /**
+     * @return float|int Basket total in major units, comparable with get_total_paid()
+     */
+    protected function get_total_due(): float|int
     {
-        return isset($this->txnData->basket) ? (int)$this->txnData->basket->amountInCents : 0;
+        return isset($this->txnData->basket) ? (int)$this->txnData->basket->amountInCents / 100 : 0;
     }
 
     protected function get_result_code(): string
@@ -1187,8 +1187,9 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
                 $payment_methods = [$payment_methods];
             }
 
-            foreach ($payment_methods as $type => $payment_method) {
-                $transaction_notes .= "<br />=== Method " . $type . "===";
+            foreach ($payment_methods as $index => $payment_method) {
+                $type = $payment_method->paymentMethodType ?? '';
+                $transaction_notes .= "<br />=== " . ($type ?? $index) . " ===";
                 foreach ($payment_method as $key => $value) {
                     $transaction_notes .= "<br />&nbsp;&nbsp;=> " . $key . ": " . $value;
                 }
@@ -1203,7 +1204,6 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
      * Saves the card id
      * used for trials, and changing payment option
      *
-     * @param int      $card_id The card reference.
      * @param WC_Order $order The order object related to the transaction.
      */
     protected function save_card_id($order)
@@ -1214,7 +1214,7 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
     }
 
     /**
-     * @param $order
+     * @param WC_Order $order
      *
      * @return mixed
      */
@@ -1227,6 +1227,11 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
         return false;
     }
 
+    /**
+     * @param WC_Order $order
+     *
+     * @return mixed
+     */
     protected function get_transaction_type($order)
     {
         return $order->get_meta('_payu_transaction_type', true);
@@ -1251,14 +1256,21 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
         return $this->transaction_type;
     }
 
-    private function validate_amount_paid(): bool
+    /**
+     * @param mixed $amount_due
+     * @param mixed $amount_paid
+     * @return bool
+     */
+    private function validate_amount_paid($amount_due, $amount_paid): bool
     {
-        $amount_due = $this->get_total_due();
-        $amount_paid = $this->get_total_paid();
-
         return sprintf('%.2F', $amount_due) == sprintf('%.2F', $amount_paid);
     }
 
+    /**
+     * @param WC_Order $order
+     *
+     * @return mixed
+     */
     private function save_payu_transaction_data($order)
     {
         $this->save_transaction_id($order);
@@ -1281,5 +1293,12 @@ class WC_Gateway_PayU extends WC_Payment_Gateway
 
         $order->update_meta_data('_payu_transaction_refunded_amount', 0);
         $order->save();
+    }
+
+    private function is_separate_discovery_miles_configuration() {
+        return 'yes' === $this->settings['dm_enabled'] &&
+            !empty($this->settings['dm_username']) &&
+            !empty($this->settings['dm_password']) &&
+            !empty($this->settings['dm_safekey']);
     }
 }
